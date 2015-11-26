@@ -14,7 +14,7 @@ IDAtropy requires the matplotlib python's library. Personally, I prefer the foll
 
 Simply, copy `IDAtropy.py` to the IDA's plugins folder.
 
-# SCREENSHOTS
+## SCREENSHOTS
 
 ##### Plugin options
 ![Snapshot1](https://cloud.githubusercontent.com/assets/1675387/11427089/b6e1f0cc-9460-11e5-9650-a9c839c9dbe4.png "Plugin options")
