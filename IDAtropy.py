@@ -22,15 +22,29 @@ from idc import *
 from idaapi import *
 from idautils import *
 from sets import Set
-from PySide import QtGui, QtCore
-from PySide.QtGui import QIcon, QColor, QTextEdit, QTableWidget, QTreeWidget, QCheckBox
+
+# IDA < 6.9 support
+if IDA_SDK_VERSION < 690:
+  from PySide import QtGui, QtCore
+  from PySide.QtGui import QTextEdit, QTableWidget, QTreeWidget, QCheckBox
+  QtWidgets = QtGui
+  USE_PYQT5 = False
+else:
+  from PyQt5 import QtGui, QtCore, QtWidgets
+  from PyQt5.QtWidgets import QTextEdit, QTableWidget, QTreeWidget, QCheckBox
+  USE_PYQT5 = True
 
 try:
   import matplotlib.pyplot as plt
   import matplotlib.ticker as ticker
-  from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
-  from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
-  from matplotlib.backend_bases import key_press_handler
+
+  if USE_PYQT5:
+    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+  else:
+    from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
+  from matplotlib.backend_bases import key_press_handler  
 except ImportError:
   ERROR_MATPLOTLIB = True
 
@@ -105,9 +119,9 @@ class ChartType:
   HISTOGRAM = 0
   ENTROPY   = 1
 
-class Options(QtGui.QWidget):
+class Options(QtWidgets.QWidget):
   def __init__(self, parent):
-    QtGui.QWidget.__init__(self)
+    QtWidgets.QWidget.__init__(self)
     self.parent = parent
     self.config = parent.config
     self.name = "Options"
@@ -146,12 +160,12 @@ class Options(QtGui.QWidget):
     return title
 
   def create_gui(self):
-    self.t_start_addr    = QtGui.QLineEdit(self)
-    self.t_end_addr      = QtGui.QLineEdit(self)
-    self.cb_section      = QtGui.QComboBox(self)
-    self.cb_disk_bin     = QtGui.QCheckBox(self)
-    self.cb_debug_memory = QtGui.QCheckBox(self)
-    button_chart         = QtGui.QPushButton("Chart")
+    self.t_start_addr    = QtWidgets.QLineEdit(self)
+    self.t_end_addr      = QtWidgets.QLineEdit(self)
+    self.cb_section      = QtWidgets.QComboBox(self)
+    self.cb_disk_bin     = QtWidgets.QCheckBox(self)
+    self.cb_debug_memory = QtWidgets.QCheckBox(self)
+    button_chart         = QtWidgets.QPushButton("Chart")
 
     self.t_start_addr.setFixedWidth(200)
     self.t_end_addr.setFixedWidth(200)
@@ -160,7 +174,7 @@ class Options(QtGui.QWidget):
 
     self.fill_sections()
 
-    form = QtGui.QFormLayout()
+    form = QtWidgets.QFormLayout()
     form.addRow("Start address:", self.t_start_addr)
     form.addRow("End address:", self.t_end_addr)
     form.addRow("Section:", self.cb_section)
@@ -216,12 +230,12 @@ class Options(QtGui.QWidget):
       self.cb_section.setEnabled(False)
 
   def create_chart_type_group(self):
-    vbox = QtGui.QVBoxLayout()
-    self.rg_chart_type = QtGui.QButtonGroup()
+    vbox = QtWidgets.QVBoxLayout()
+    self.rg_chart_type = QtWidgets.QButtonGroup()
     self.rg_chart_type.setExclusive(True)
 
     for i, choice in enumerate(self.config.chart_types):
-      radio = QtGui.QRadioButton(choice)
+      radio = QtWidgets.QRadioButton(choice)
       self.rg_chart_type.addButton(radio, i)
       if i == self.config.chart_type: 
         radio.setChecked(True)
@@ -255,9 +269,9 @@ class Options(QtGui.QWidget):
     except ValueError:
       return False
 
-class Entropy(QtGui.QWidget):
+class Entropy(QtWidgets.QWidget):
   def __init__(self, parent, data):
-    QtGui.QWidget.__init__(self)
+    QtWidgets.QWidget.__init__(self)
     self.parent = parent
     self.config = parent.config
     self.data   = data
@@ -287,12 +301,12 @@ class Entropy(QtGui.QWidget):
 
     self.canvas = FigureCanvas(self.fig)
     self.toolbar = NavigationToolbar(self.canvas, self)
-    self.line_edit = QtGui.QLineEdit()
+    self.line_edit = QtWidgets.QLineEdit()
 
-    grid = QtGui.QGridLayout()
+    grid = QtWidgets.QGridLayout()
     grid.setSpacing(10)
 
-    self.cb_jump_on_click = QtGui.QCheckBox("Disable double-click event")    
+    self.cb_jump_on_click = QtWidgets.QCheckBox("Disable double-click event")    
     self.cb_jump_on_click.stateChanged.connect(self.disable_jump_on_click)
     grid.addWidget(self.canvas, 0, 0)
     grid.addWidget(self.toolbar, 1, 0)
@@ -317,7 +331,7 @@ class Entropy(QtGui.QWidget):
       except:
         log(traceback.format_exc())
 
-class TableItem(QtGui.QTableWidgetItem):  
+class TableItem(QtWidgets.QTableWidgetItem):  
   class ItemType:
     DEC = 0
     HEX = 1
@@ -325,7 +339,7 @@ class TableItem(QtGui.QTableWidgetItem):
     TEXT = 3
 
   def __init__(self, text, item_type):
-    QtGui.QTableWidgetItem.__init__(self, text, QtGui.QTableWidgetItem.UserType)
+    QtWidgets.QTableWidgetItem.__init__(self, text, QtWidgets.QTableWidgetItem.UserType)
     self.setFlags(QtCore.Qt.ItemIsEnabled)
     self.item_type = item_type
     self.text = text  
@@ -344,16 +358,16 @@ class TableItem(QtGui.QTableWidgetItem):
     else:
       raise TypeError("The ItemType specified is not supported")
 
-class Histogram(QtGui.QWidget):
+class Histogram(QtWidgets.QWidget):
   def __init__(self, parent, data):
-    QtGui.QWidget.__init__(self)
+    QtWidgets.QWidget.__init__(self)
     self.parent = parent
     self.config = parent.config
     self.data   = data
     self.gen_histogram()
 
   def gen_histogram(self):
-    grid = QtGui.QGridLayout()
+    grid = QtWidgets.QGridLayout()
     self.data_size = len(self.data)
     self.counter   = histogram(self.data)
     self.counts    = [round(100*float(byte_count)/self.data_size, 2) for byte_count in self.counter] 
@@ -401,7 +415,7 @@ class Histogram(QtGui.QWidget):
     log("Histogram - %-18s: %6d (%2.02f %%)" % (name, n_bytes, (float(n_bytes)/self.data_size*100)))
 
   def create_table(self):
-    self.table = QtGui.QTableWidget()
+    self.table = QtWidgets.QTableWidget()
     self.table.setColumnCount(5)
     self.table.setColumnWidth(0, 5)
     self.table.setColumnWidth(1, 5)
@@ -446,15 +460,19 @@ class IDAtropyForm(PluginForm):
     self.old_timeout = idaapi.set_script_timeout(0)
 
   def OnCreate(self, form):
-    self.parent = self.FormToPySideWidget(form)
+    if USE_PYQT5:
+      self.parent = self.FormToPyQtWidget(form)
+    else:
+      self.parent = self.FormToPySideWidget(form)
     self.PopulateForm()
 
   def RemoveTab(self, index):
     pass
 
   def PopulateForm(self):
-    layout = QtGui.QVBoxLayout()
-    self.tabs = QtGui.QTabWidget()
+    layout = QtWidgets.QVBoxLayout()
+
+    self.tabs = QtWidgets.QTabWidget()
     self.tabs.setMovable(True)
     self.tabs.setTabsClosable(True)
     self.tabs.tabCloseRequested.connect(self.remove_tabs)
@@ -497,5 +515,7 @@ def PLUGIN_ENTRY():
 if __name__ == '__main__':
   log("Plugin loaded")
   #plg = IDAtropyForm().Show(PLUG_NAME)
+
+
 
 
