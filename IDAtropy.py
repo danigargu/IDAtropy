@@ -84,11 +84,17 @@ def get_ida_bytes(start_addr, end_addr, debug_memory):
   read_byte = Byte
   if debug_memory:
     read_byte = DbgByte
+
   try:
     # Another more efficient way to prevent section size aligment in IDB?
-    for addr in filter(isLoaded, xrange(start_addr, end_addr)):
-      bytes += chr(read_byte(addr))
+    c_addr = start_addr
+    while c_addr < end_addr:
+      if isLoaded(c_addr):
+        bytes += chr(read_byte(c_addr))
+      c_addr += 1
+
   except Exception, e:
+    warning("Error reading data: %s" % e)
     return None
   return bytes 
 
