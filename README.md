@@ -6,9 +6,11 @@ IDAtropy is a plugin for Hex-Ray's IDA Pro designed to generate charts of entrop
 
 IDAtropy requires the matplotlib python's library. Personally, I prefer the following steps to install it, that not requiere compile Numpy:
 
-*  Download the lasted numpy .whl from: http://www.lfd.uci.edu/~gohlke/pythonlibs/#numpy
-*  Install with pip: pip install numpy-1.9.3+mkl-cp27-none-win32.whl
-*  Finally, install matplotlib: pip install matplotlib
+* Download the lasted numpy .whl from: http://www.lfd.uci.edu/~gohlke/pythonlibs/#numpy
+* Install with pip: 
+    * IDA <= 6.9: `pip install numpy-1.13.3+mkl-cp27-cp27m-win32.whl`
+    * IDA >= 7.0 (for python x64): `pip install numpy-1.13.3+mkl-cp27-cp27m-win_amd64.whl`
+* Finally, install matplotlib: `pip install matplotlib`
 
 The plugin was only extensively tested on IDA Pro <= 6.9 for Windows, with Python 2.7 and matplotlib 1.4.3, but it should work with other versions and OS's. If you find any inconsistency, let me know.
 
