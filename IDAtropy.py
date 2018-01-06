@@ -49,7 +49,7 @@ except ImportError:
   ERROR_MATPLOTLIB = True
 
 PLUG_NAME    = "IDAtropy"
-PLUG_VERSION = "v0.1"
+PLUG_VERSION = "v0.2"
 
 def log(msg):
   Message("[%s] %s\n" % (PLUG_NAME, msg))
@@ -109,6 +109,23 @@ def get_data(config):
     return data
   return None
 
+def load_file_in_segment(filename, seg_name):
+  last_seg = get_last_seg()
+  seg_start = last_seg.end_ea
+  data = None
+
+  with open(filename, 'rb') as f:
+    data = f.read()
+
+  seg_len = len(data)
+  if seg_len % 0x1000 != 0:
+    seg_len = seg_len + (0x1000 - (seg_len % 0x1000))
+
+  if add_segm(0, seg_start, seg_start+seg_len, seg_name, "DATA"):
+    put_bytes(seg_start, data)
+    return True
+  return False
+
 class Config:
   def __init__(self):
     self.chart_type   = 0
@@ -117,8 +134,11 @@ class Config:
     self.chart_type   = 0
     self.block_size   = 256
     self.disk_binary  = False
+    self.segm_exists  = False
     self.debug_memory = False
     self.byte_entropy = False
+    self.segm_ea      = None
+    self.segm_name    = "IDAtropy"
     self.chart_types  = ["Histogram", "Entropy"]
 
 class ChartType:
@@ -131,7 +151,14 @@ class Options(QtWidgets.QWidget):
     self.parent = parent
     self.config = parent.config
     self.name = "Options"
+    self.check_if_segm_exists()
     self.create_gui()
+
+  def check_if_segm_exists(self):
+    segm = get_segm_by_name(self.config.segm_name)
+    if segm:
+      self.config.segm_exists = True
+      self.config.segm_ea = segm.startEA
 
   def chart_type_on_click(self):
     if not self.update_addrs():
@@ -144,14 +171,24 @@ class Options(QtWidgets.QWidget):
         hide_wait_box()
         warning("There's no data to make the chart")
         return
-      if self.config.chart_type == ChartType.ENTROPY:       
+      if self.config.chart_type == ChartType.ENTROPY:
+        if not self.config.segm_exists:
+          msg1 = "Do you want to create new segment with the binary content?\n"
+          msg2 = "This will allow you to navigate over the file by double-clicking on the chart"
+          if askyn_c(1, "HIDECANCEL\n" + msg1 + msg2) == 1:
+            self.create_segment_with_binary()
         self.parent.tabs.addTab(Entropy(self, data), self.get_tab_title())
       elif self.config.chart_type == ChartType.HISTOGRAM:
         self.parent.tabs.addTab(Histogram(self, data), self.get_tab_title())
       del data
     except Exception, e:
-      warning("%s" % e)
-    hide_wait_box()    
+      warning("%s" % traceback.format_exc())
+    hide_wait_box()
+
+  def create_segment_with_binary(self):
+    if load_file_in_segment(GetInputFilePath(), self.config.segm_name):
+      self.config.segm_exists = True
+      self.check_if_segm_exists()
 
   def get_tab_title(self):
     i_type = self.config.chart_type
@@ -317,9 +354,10 @@ class Entropy(QtWidgets.QWidget):
     grid.addWidget(self.canvas, 0, 0)
     grid.addWidget(self.toolbar, 1, 0)
 
-    if not self.config.disk_binary:
+    if not self.config.disk_binary or self.config.segm_exists:
       grid.addWidget(self.cb_jump_on_click, 2, 0)
       self.cid = self.fig.canvas.mpl_connect('button_press_event', self.on_click)
+
     self.setLayout(grid)
 
   def disable_jump_on_click(self, state):
@@ -330,8 +368,13 @@ class Entropy(QtWidgets.QWidget):
 
   def on_click(self, event):
     if event.dblclick and event.xdata:
-      addr = self.config.start_addr + (int(event.xdata) * self.config.block_size)
-      log("Pressed addr: 0x%08x" % addr)
+      if self.config.segm_exists:
+        offset = int(event.xdata) * self.config.block_size
+        addr = self.config.segm_ea + offset
+        log("Pressed addr: 0x%08x (offset: 0x%08x)" % (addr, offset))
+      else:
+        addr = self.config.start_addr + (int(event.xdata) * self.config.block_size)
+        log("Pressed addr: 0x%08x" % addr)
       try:
         idc.Jump(addr)
       except:
