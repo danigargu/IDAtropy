@@ -1101,7 +1101,7 @@ class IDAtropyForm(PluginForm):
     self.config = Config()
 
     # disable timeout for scripts
-    self.old_timeout = idaapi.set_script_timeout(0)
+    self.old_timeout = set_script_timeout(0)
 
   def OnCreate(self, form):
     if USE_PYQT5:
