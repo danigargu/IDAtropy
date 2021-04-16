@@ -1,8 +1,8 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
 #  IDAtropy
-#  last update: 2018/02/06
+#  last update: 2021/04/12
 #
 #  Daniel Garcia <danigargu [at] gmail.com>
 #  @danigargu
@@ -18,24 +18,18 @@ import math
 import zlib
 import string
 import random
+import traceback
 
-from idc import *
-from idaapi import *
-from idautils import *
-from sets import Set
+import idc
+import idautils
+import idaapi
+
+from idaapi import Choose
+
+from PyQt5 import QtGui, QtCore, QtWidgets
+from PyQt5.QtWidgets import QTextEdit, QTableWidget, QTreeWidget, QCheckBox
 
 from collections import Counter, OrderedDict
-
-# IDA < 6.9 support
-if IDA_SDK_VERSION < 690:
-  from PySide import QtGui, QtCore
-  from PySide.QtGui import QTextEdit, QTableWidget, QTreeWidget, QCheckBox
-  QtWidgets = QtGui
-  USE_PYQT5 = False
-else:
-  from PyQt5 import QtGui, QtCore, QtWidgets
-  from PyQt5.QtWidgets import QTextEdit, QTableWidget, QTreeWidget, QCheckBox
-  USE_PYQT5 = True
 
 try:
   import sip
@@ -44,28 +38,21 @@ try:
   import matplotlib.ticker as ticker
   from matplotlib.colors import hsv_to_rgb
 
-  if USE_PYQT5:
-    matplotlib.use('Qt5Agg')
-    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-    from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
-  else:
-    from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
-    from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
+  from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+  from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
   from matplotlib.backend_bases import key_press_handler  
 except ImportError:
   ERROR_MATPLOTLIB = True
 
 
-PLUG_NAME    = "IDAtropy"
-PLUG_VERSION = "v0.3"
-
+PLUG_NAME = "IDAtropy"
 
 def log(msg):
-  Message("[%s] %s\n" % (PLUG_NAME, msg))
+  idaapi.msg("[%s] %s\n" % (PLUG_NAME, msg))
 
 def histogram(data):
   table = [0]*256
-  for i in map(ord, data):
+  for i in data:
     table[i] += 1
   return table
 
@@ -85,7 +72,7 @@ def gen_rand_colors(n_colors=20):
   return colors
 
 def entropy_scan(data, block_size=256, step_size=1) :
-  for block in (data[x:block_size+x] for x in xrange (0, len(data)-block_size, step_size)):
+  for block in (data[x:block_size+x] for x in range (0, len(data)-block_size, step_size)):
     yield entropy(block)
 
 def entropy(data):
@@ -110,29 +97,25 @@ def calc_compression_ratio(data):
   return result
 
 def get_loaded_bytes(start_addr, size, fill_with="\x00"):
-  bytes = ""
+  data = ""
   cur_ea = start_addr
   while cur_ea < (start_addr+size):
-    if isLoaded(cur_ea):
-      bytes += chr(get_byte(cur_ea))
+    if idaapi.is_loaded(cur_ea):
+      data += chr(idaapi.get_byte(cur_ea))
     else:
-      bytes += fill_with
+      data += fill_with
     cur_ea += 1
-  return bytes
-
-def my_put_bytes(ea, buf):
-  for i in xrange(len(buf)):
-    patch_byte(ea+i, ord(buf[i]))
+  return bytes(data, 'latin1')
 
 def get_disk_binary():
   data = None
-  with open(get_input_file_path(), 'rb') as f:
+  with open(idc.get_input_file_path(), 'rb') as f:
     data = f.read()
   return data
 
 def load_file_in_segment(filename, seg_name):
-  last_seg = get_last_seg()
-  seg_start = last_seg.endEA
+  last_seg = idaapi.get_last_seg()
+  seg_start = last_seg.end_ea
   data = None
 
   with open(filename, 'rb') as f:
@@ -142,8 +125,8 @@ def load_file_in_segment(filename, seg_name):
   if seg_len % 0x1000 != 0:
     seg_len = seg_len + (0x1000 - (seg_len % 0x1000))
 
-  if add_segm(0, seg_start, seg_start+seg_len, seg_name, "DATA"):
-    put_bytes(seg_start, data)
+  if idaapi.add_segm(0, seg_start, seg_start+seg_len, seg_name, "DATA"):
+    idaapi.put_bytes(seg_start, data)
     return True
   return False
 
@@ -174,14 +157,17 @@ class ChartTypes:
   ENTROPY = 0
   HISTOGRAM = 1
 
-class XrefsEntropy(Choose2):
+class XrefsEntropy(Choose):
   def __init__(self, title, config):
-    Choose2.__init__(self, title, [ 
-        ["Address", 16 | Choose2.CHCOL_HEX],
-        ["Entropy", 10 | Choose2.CHCOL_DEC],
-        ["Xrefs", 4 | Choose2.CHCOL_HEX],         
-        ["Is code", 4 | Choose2.CHCOL_DEC],
-        ["Xref Type", 15 | Choose2.CHCOL_PLAIN] ])
+    super().__init__(
+      title, [
+        ["Address", 16 | Choose.CHCOL_HEX],
+        ["Entropy", 10 | Choose.CHCOL_DEC],
+        ["Xrefs", 4 | Choose.CHCOL_HEX],
+        ["Is code", 4 | Choose.CHCOL_DEC],
+        ["Xref Type", 15 | Choose.CHCOL_PLAIN]
+      ]
+    )
 
     self.title  = title
     self.items  = []
@@ -194,7 +180,7 @@ class XrefsEntropy(Choose2):
 
   def OnSelectLine(self, n):
     item = self.items[int(n)]
-    jumpto(int(item[0], 16))
+    idaapi.jumpto(int(item[0], 16))
 
   def OnGetLine(self, index):
     return self.items[index]
@@ -222,9 +208,7 @@ class XrefsEntropy(Choose2):
       return False 
 
     self.items = [i for i in self.items if i[3] != '1']
-
-    if IDA_SDK_VERSION >= 700:
-      refresh_choosers()
+    idaapi.refresh_choosers()
 
     return True
 
@@ -236,38 +220,38 @@ class XrefsEntropy(Choose2):
         self.cmd_exclude_code_xrefs = self.AddCommand("Exclude code xrefs")
         return True
     else:
-      warning("No xrefs found")
+      idaapi.warning("No xrefs found")
     return False
 
   def PopulateItems(self):
     min_entropy = self.config['min_entropy']
     cur_ea = self.config['start_addr']
 
-    show_wait_box("Searching xrefs...")
+    idaapi.show_wait_box("Searching xrefs...")
 
     while cur_ea < self.config['end_addr']:
-      xrefs = list(XrefsTo(cur_ea))
-      if len(xrefs) > 0 and xrefs[0].type != fl_F: # discard ordinary flow
-        bytes = get_bytes(cur_ea, self.config['block_size'])
-        assert len(bytes) == self.config['block_size']
+      xrefs = list(idautils.XrefsTo(cur_ea))
+      if len(xrefs) > 0 and xrefs[0].type != idaapi.fl_F: # discard ordinary flow
+        data = idaapi.get_bytes(cur_ea, self.config['block_size'])
+        assert len(data) == self.config['block_size']
 
-        ent = entropy(bytes)
+        ent = entropy(data)
         if ent >= min_entropy:
           self.items.append([
             "%08X" % cur_ea,
             "%.04f" % ent,
             "%d" % len(xrefs),
             "%d" % xrefs[0].iscode,
-            "%s" % XrefTypeName(xrefs[0].type)              
+            "%s" % idautils.XrefTypeName(xrefs[0].type)
           ])
       cur_ea += 1
 
-    hide_wait_box()
+    idaapi.hide_wait_box()
 
 
 class Options(QtWidgets.QWidget):
   def __init__(self, parent):
-    QtWidgets.QWidget.__init__(self)
+    super().__init__()
     self.parent = parent
     self.config = parent.config
     self.name = "Options"
@@ -275,17 +259,17 @@ class Options(QtWidgets.QWidget):
     self.create_gui()
 
   def check_if_segm_exists(self):
-    segm = get_segm_by_name(self.config.entropy['segm_name'])
+    segm = idaapi.get_segm_by_name(self.config.entropy['segm_name'])
     if segm:
       self.config.entropy['segm_exists'] = True
-      self.config.entropy['segm_addr']   = segm.startEA
+      self.config.entropy['segm_addr']   = segm.start_ea
     else:
       self.config.entropy['segm_exists'] = False
       self.config.entropy['segm_addr']   = None
 
   def button_chart_on_click(self):
     try:      
-      show_wait_box("Making chart...")
+      idaapi.show_wait_box("Making chart...")
       tab_title = self.get_tab_title()
 
       if self.config.chart_type == ChartTypes.ENTROPY:
@@ -293,7 +277,7 @@ class Options(QtWidgets.QWidget):
 
           msg1 = "Do you want to create new segment with the binary content?\n"
           msg2 = "This will allow you to navigate over the file by double-clicking on the chart"
-          if askyn_c(1, "HIDECANCEL\n" + msg1 + msg2) == 1:
+          if idaapi.ask_yn(1, "HIDECANCEL\n" + msg1 + msg2) == 1:
             self.create_segment_with_binary()
 
         self.parent.tabs.addTab(Entropy(self), tab_title)
@@ -301,9 +285,10 @@ class Options(QtWidgets.QWidget):
       elif self.config.chart_type == ChartTypes.HISTOGRAM:
         self.parent.tabs.addTab(Histogram(self), tab_title)
       
-    except Exception, e:
-      warning("%s" % traceback.format_exc())
-    hide_wait_box()
+    except Exception as e:
+      idaapi.warning("%s" % traceback.format_exc())
+
+    idaapi.hide_wait_box()
 
   def button_xrefs_on_click(self):
     log("Start address : 0x%08x" % self.config.start_addr)
@@ -320,7 +305,7 @@ class Options(QtWidgets.QWidget):
 
   def create_segment_with_binary(self):
     segm_name = self.config.entropy['segm_name']
-    if load_file_in_segment(GetInputFilePath(), segm_name):
+    if load_file_in_segment(idc.get_input_file_path(), segm_name):
       self.config.segm_exists = True
       self.check_if_segm_exists()
 
@@ -334,7 +319,7 @@ class Options(QtWidgets.QWidget):
     elif self.config.entropy['all_segments']:
       title += "All segments"
     else:
-      segname = SegName(self.config.start_addr)
+      segname = idc.get_segm_name(self.config.start_addr)
       if segname:
         title += "%s " % segname
       title += "[0x%08x - 0x%08x]" % (self.config.start_addr, self.config.end_addr)
@@ -346,10 +331,11 @@ class Options(QtWidgets.QWidget):
       data = get_disk_binary()
     else:
       data_size = self.config.end_addr - self.config.start_addr
-      data = get_bytes(self.config.start_addr, data_size)
+      data = idaapi.get_bytes(self.config.start_addr, data_size)
     return data
 
   def update_progress_bars(self):
+    try:
       data = self.get_data()
       ent = entropy(data)
       norm_ent = ent/8*100
@@ -358,6 +344,12 @@ class Options(QtWidgets.QWidget):
       self.pb_entropy.setValue(norm_ent)
       self.pb_entropy.setFormat("%0.2f" % ent)
       self.pb_comp_ratio.setValue(comp_ratio)
+
+    except FileNotFoundError:
+      idaapi.warning("Input file doesn't exist: %s" % idc.get_input_file_path())
+    except Exception as e:
+      idaapi.warning("%s" % traceback.format_exc())
+
 
   def update_address(self):
     sender = self.sender()
@@ -383,7 +375,7 @@ class Options(QtWidgets.QWidget):
       """
 
     except ValueError as e:
-      warning("Invalid value for address")
+      idaapi.warning("Invalid value for address")
 
   def update_entropy_config(self):
     try:
@@ -596,12 +588,12 @@ class Options(QtWidgets.QWidget):
       self.cb_disk_bin.setEnabled(not checked)
 
   def fill_segments(self):
-    segments = filter(self.segment_filter, Segments())
+    segments = filter(self.segment_filter, idautils.Segments())
 
     for idx, s_ea in enumerate(segments):
       if idx == 0:
-        self.set_address(SegStart(s_ea), SegEnd(s_ea))
-      self.cb_segment.addItem(SegName(s_ea), s_ea)
+        self.set_address(idc.get_segm_start(s_ea), idc.get_segm_end(s_ea))
+      self.cb_segment.addItem(idc.get_segm_name(s_ea), s_ea)
 
     if not segments:
       self.set_address(MinEA(), MaxEA())
@@ -632,7 +624,7 @@ class Options(QtWidgets.QWidget):
 
   def cb_segment_changed(self, value):
     s_ea = self.sender().itemData(value)
-    self.set_address(SegStart(s_ea), SegEnd(s_ea))
+    self.set_address(idc.get_segm_start(s_ea), idc.get_segm_end(s_ea))
     self.update_progress_bars()   
 
   def set_address(self, start_addr, end_addr):
@@ -641,15 +633,15 @@ class Options(QtWidgets.QWidget):
 
   def segment_filter(self, s_ea):
     """ Discard extern segments """
-    if GetSegmentAttr(s_ea, SEGATTR_TYPE) != SEG_XTRN and \
-     SegName(s_ea) != self.config.entropy['segm_name']:
+    if idc.get_segm_attr(s_ea, idc.SEGATTR_TYPE) != idc.SEG_XTRN and \
+     idc.get_segm_name(s_ea) != self.config.entropy['segm_name']:
       return True
     return False
 
 
 class Entropy(QtWidgets.QWidget):
   def __init__(self, parent):
-    QtWidgets.QWidget.__init__(self)
+    super().__init__()
     self.parent         = parent
     self.config         = parent.config
     self.entropy_cfg    = self.config.entropy
@@ -669,8 +661,8 @@ class Entropy(QtWidgets.QWidget):
 
   def segment_filter(self, s_ea):
     """ Discard extern segments """
-    if GetSegmentAttr(s_ea, SEGATTR_TYPE) != SEG_XTRN and \
-     SegName(s_ea) != self.config.entropy['segm_name']:
+    if idc.get_segm_attr(s_ea, idc.SEGATTR_TYPE) != idc.SEG_XTRN and \
+     idc.get_segm_name(s_ea) != self.config.entropy['segm_name']:
       return True
     return False
 
@@ -680,7 +672,7 @@ class Entropy(QtWidgets.QWidget):
       data = get_disk_binary()
     else:
       data_size = self.config.end_addr - self.config.start_addr
-      data = get_bytes(self.config.start_addr, data_size)
+      data = idaapi.get_bytes(self.config.start_addr, data_size)
 
     self.data = data
     self.data_size = len(data)
@@ -688,38 +680,38 @@ class Entropy(QtWidgets.QWidget):
   def format_coord_segments(self, x, y):
     try:
       addr = self.calc_addr_fcn(int(x))
-      return "0x%08X - %-20s" % (addr, SegName(addr))
+      return "0x%08X - %-20s" % (addr, idc.get_segm_name(addr))
     except:
       return 'bad address'
 
-  def get_segments_memory(self):    
-    memory = ""
+  def get_segments_memory(self):
+    memory = b""
     step_size = self.entropy_cfg['step_size']
     segments  = OrderedDict()
 
-    for ea in filter(self.segment_filter, Segments()):
-      seg_name = SegName(ea)
-      segm  = get_segm_by_name(seg_name)
-      bytes = get_bytes(segm.startEA, segm.size())
-      assert len(bytes) == segm.size()
+    for ea in filter(self.segment_filter, idautils.Segments()):
+      seg_name = idc.get_segm_name(ea)
+      segm  = idaapi.get_segm_by_name(seg_name)
+      data = idaapi.get_bytes(segm.start_ea, segm.size())
+      assert len(data) == segm.size()
 
       start_offset = len(memory)
-      end_offset   = (start_offset+len(bytes))
+      end_offset   = (start_offset+len(data))
 
       seg_info = {
         'segm': segm,
-        'entropy': entropy(bytes),
+        'entropy': entropy(data),
         'offsets': [
           start_offset ,
           end_offset
         ],
         'chart_offsets': [
-          start_offset / step_size, 
-          end_offset / step_size
+          start_offset // step_size,
+          end_offset // step_size
         ]
       }
       segments[seg_name] = seg_info
-      memory += bytes
+      memory += data
 
     self.data = memory
     self.data_size = len(memory)
@@ -727,11 +719,11 @@ class Entropy(QtWidgets.QWidget):
 
   def calc_point_addr_segments(self, x):
     addr = None
-    for segm_name, segm_info in self.segments.iteritems():
+    for segm_name, segm_info in self.segments.items():
       start, end = segm_info['chart_offsets']
       if start <= x < end:
         norm_x = (x-start) * self.entropy_cfg['step_size']
-        addr = segm_info['segm'].startEA + norm_x
+        addr = segm_info['segm'].start_ea + norm_x
         break
     return addr
 
@@ -765,7 +757,7 @@ class Entropy(QtWidgets.QWidget):
 
     self.calc_addr_fcn = self.calc_point_addr_segments
 
-    for segm_name, seg_info in self.segments.iteritems():
+    for segm_name, seg_info in self.segments.items():
       segment_names.append(segm_name)
       x_axis.append(seg_info['chart_offsets'][0])
 
@@ -869,9 +861,9 @@ class Entropy(QtWidgets.QWidget):
     if event.dblclick and event.xdata:
       addr = self.calc_addr_fcn(int(event.xdata))
       if addr:
-        jumpto(addr)
+        idaapi.jumpto(addr)
       else:
-        warning("Unable to calculate the address")
+        idaapi.warning("Unable to calculate the address")
 
   def format_coord_normal(self, x, y):
     try:
@@ -880,7 +872,7 @@ class Entropy(QtWidgets.QWidget):
         return "Offset : 0x%08x %-30s" % (addr, "")
       else:
         addr = self.calc_addr_fcn(int(x))
-        return "0x%08x - %-30s" % (addr, SegName(addr))       
+        return "0x%08x - %-30s" % (addr, idc.get_segm_name(addr))
     except:
       pass
     return "bad address"
@@ -945,7 +937,7 @@ class TableItem(QtWidgets.QTableWidgetItem):
     TEXT = 3
 
   def __init__(self, text, item_type):
-    QtWidgets.QTableWidgetItem.__init__(self, text, QtWidgets.QTableWidgetItem.UserType)
+    super().__init__(text, QtWidgets.QTableWidgetItem.UserType)
     self.setFlags(QtCore.Qt.ItemIsEnabled)
     self.item_type = item_type
     self.text = text  
@@ -966,7 +958,7 @@ class TableItem(QtWidgets.QTableWidgetItem):
 
 class Histogram(QtWidgets.QWidget):
   def __init__(self, parent):
-    QtWidgets.QWidget.__init__(self)
+    super().__init__()
     self.parent   = parent
     self.config   = parent.config
     self.data     = None
@@ -989,7 +981,7 @@ class Histogram(QtWidgets.QWidget):
   def format_coord(self, x, y):    
     try:
       value = int(x)
-      return "value: %d | count: %-30s" % (value, self.counter[value] )
+      return "value: %d | count: %-30s" % (value, self.counter[value])
     except:
       pass
     return "bad value"
@@ -1059,15 +1051,15 @@ class Histogram(QtWidgets.QWidget):
     self.table.verticalHeader().hide()
     self.table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
     
-    printable = map(ord, string.printable[:-6])
+    printable = string.printable[:-6]
     for byte, count in enumerate(self.counter):
-      char = 0      
-      if byte in printable:
-        char = byte
+      char = ''
+      if chr(byte) in printable:
+        char = chr(byte)
 
       dec_item     = TableItem("%d" % byte,  TableItem.ItemType.DEC)
       hex_item     = TableItem("%02X" % byte,TableItem.ItemType.HEX)
-      char_item    = TableItem("%c" % char,  TableItem.ItemType.TEXT)
+      char_item    = TableItem("%s" % char,  TableItem.ItemType.TEXT)
       count_item   = TableItem("%d" % count, TableItem.ItemType.DEC)
       percert_item = TableItem("%s%%" % self.counts[byte], TableItem.ItemType.FLOAT)
 
@@ -1085,29 +1077,18 @@ class Histogram(QtWidgets.QWidget):
     self.table.sortItems(3, QtCore.Qt.DescendingOrder)
     self.table.setSelectionBehavior(QtWidgets.QTableWidget.SelectRows)  
 
-def make_ida6_compatible():
-  """ Compatibility between IDA 6.X and 7.X """
 
-  global get_bytes
-  global put_bytes
 
-  if IDA_SDK_VERSION < 700:
-    get_bytes = get_loaded_bytes
-    put_bytes = my_put_bytes
-
-class IDAtropyForm(PluginForm):
+class IDAtropyForm(idaapi.PluginForm):
   def __init__(self):
-    super(IDAtropyForm, self).__init__()
+    super().__init__()
     self.config = Config()
 
     # disable timeout for scripts
     self.old_timeout = idaapi.set_script_timeout(0)
 
   def OnCreate(self, form):
-    if USE_PYQT5:
-      self.parent = self.FormToPyQtWidget(form)
-    else:
-      self.parent = self.FormToPySideWidget(form)
+    self.parent = self.FormToPyQtWidget(form)
     self.PopulateForm()
 
   def RemoveTab(self, index):
@@ -1130,10 +1111,10 @@ class IDAtropyForm(PluginForm):
 
   def OnClose(self, form):
     idaapi.set_script_timeout(self.old_timeout)
-    print "[%s] Form closed." % PLUG_NAME
+    print("[%s] Form closed." % PLUG_NAME)
 
-class IDAtropy_t(plugin_t):
-    flags = PLUGIN_UNL
+class IDAtropy_t(idaapi.plugin_t):
+    flags = idaapi.PLUGIN_UNL
     comment = "IDAtropy"
     help = ""
     wanted_name = PLUG_NAME
@@ -1141,16 +1122,14 @@ class IDAtropy_t(plugin_t):
 
     def init(self):
       self.icon_id = 0
-      make_ida6_compatible()
-      return PLUGIN_OK
+      return idaapi.PLUGIN_OK
 
     def run(self, arg=0):
-      
       if not 'ERROR_MATPLOTLIB' in globals():
         f = IDAtropyForm()
         f.Show(PLUG_NAME)
       else:
-        warning("%s - The plugin requires matplotlib" % PLUG_NAME)
+        idaapi.warning("%s - The plugin requires matplotlib" % PLUG_NAME)
 
     def term(self):
         pass
@@ -1160,6 +1139,4 @@ def PLUGIN_ENTRY():
 
 if __name__ == '__main__':
   log("Plugin loaded")
-  
-
 
